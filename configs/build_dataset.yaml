@@ -14,9 +14,9 @@ rot_angle_degrees: 15           # Max rotation angle (±degrees)
 # ── Simulation Parameters ─────────────────────────────────────────────────────
 psf_hd_cm: 0.25                 # PSF FWHM for high-dose reconstruction (cm)
 psf_ld_cm: 0.40                 # PSF FWHM for low-dose reconstruction (cm)
-counts_hd: 1.0e10               # HD sinogram count level
-count_ld_window_2d: [1.0e6, 10.0e6]   # LD count range for 2D [min, max]
-count_ld_window_3d: [90.0e6, 120.0e6] # LD count range for 3D [min, max]
+counts_hd: 1.0e+10              # HD sinogram count level
+count_ld_window_2d: [1.0e+6, 1.0e+7]  # LD count range for 2D [min, max]
+count_ld_window_3d: [9.0e+7, 1.2e+8]  # LD count range for 3D [min, max]
 slices_2d: null                 # null = default (every 2nd slice, indices 65-85)
 
 # ── Reconstruction Parameters ─────────────────────────────────────────────────

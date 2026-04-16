@@ -39,6 +39,7 @@ def buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType = 'brain
     """
     bar = PET.engine.bar
     import os
+    import gc
     from phantoms.phantomlib import imRotation
     if phanType.lower()=='brainweb':
          from phantoms.brainweb import PETbrainWebPhantom
@@ -98,12 +99,13 @@ def buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType = 'brain
                  dset['imgGT'] = imgr
                  dset['mrImg'] = t1r
                  dset['counts'] = counts_ld
-                 
+
                  flname = save_training_dir+bar+'data-'
                  while os.path.isfile(flname+str(f)+'.npy'):
                       f+=1
                  np.save(flname+str(f)+'.npy', dset)
                  f+=1
+                 del imgr, mumapr, t1r, prompts_hd, AF, NF, prompts_ld, AN, img_hd, img_ld, img_ld_psf
             else: # num_slices of 3D phantoms are used to generate 2D phantoms
                  imgr = np.transpose(imRotation(img[:,:,slices_2d],randomAngle[j]),(2,0,1))
                  imgr[imgr<0]=0 
@@ -112,7 +114,7 @@ def buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType = 'brain
                  t1r = np.transpose(imRotation(t1[:,:,slices_2d],randomAngle[j]),(2,0,1))
                  t1r[t1r<0]=0
 
-                 counts_ld = count_ld_window_2d[0] + (count_ld_window_2d[1]-count_ld_window_2d[0])*np.random.rand()
+                 counts_ld = count_ld_window_2d[0] + (count_ld_window_2d[1] - count_ld_window_2d[0])*np.random.rand()
                  print("* simulate HD 2D sinograms...")
                  prompts_hd,AF,NF,_ = PET.simulateSinogramData(imgr, mumap=mumapr, counts=counts_hd, psf=psf_hd)
                  print("* simulate LD 2D sinograms...")
@@ -134,12 +136,15 @@ def buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType = 'brain
                       dset['imgGT'] = imgr[k,:,:]
                       dset['mrImg'] = t1r[k,:,:]
                       dset['counts'] = counts_ld
-                 
+
                       flname = save_training_dir+bar+'data-'
                       while os.path.isfile(flname+str(f)+'.npy'):
                            f+=1
                       np.save(flname+str(f)+'.npy', dset)
                       f+=1
+                 del imgr, mumapr, t1r, prompts_hd, AF, NF, prompts_ld, AN, img_hd, img_ld, img_ld_psf
+        del img, mumap, t1
+        gc.collect()
 
 """
 Data loader and Training models
@@ -381,7 +386,7 @@ def noise_levels_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, P
           from deeplib import noise_levels_realizations
           
           phantom_filename='D:\\pyTorch\\brainweb_20_raws\\subject_04.raws'
-          save_dir = r'D:/pyTorch\brainweb_20_raws\subject_04_noise_lr'
+          save_dir = r'D:/pyTorch/brainweb_20_raws/subject_04_noise_lr'
           pet_geometry_dir='J:\\MyPyWorkSapce\\mmr2008_brain\\'
           
           pet, mumap, t1,_ = PETbrainWebPhantom(phantom_filename,pet_lesion = True,t1_lesion = True)
