@@ -1,56 +1,104 @@
 """
-Created on July 2020
-Demo for traning a 2D FBSEM net 
+Build FBSEM training datasets from BrainWeb phantoms.
 
+Usage:
+    python build_training_sets.py --config configs/build_dataset.yaml
+    python build_training_sets.py --config configs/build_dataset.yaml \\
+        --phantom_data_dir /data/brainweb --save_training_dir /data/output
 
-@author: Abi Mehranian
-abolfazl.mehranian@kcl.ac.uk
+All parameters live in the YAML config. CLI flags override individual values.
 """
 
-
+import argparse
+import yaml
 import numpy as np
-from matplotlib import pyplot as plt
-from geometry.BuildGeometry_v4 import BuildGeometry_v4 
+
+from geometry.BuildGeometry_v4 import BuildGeometry_v4
 from models.deeplib import buildBrainPhantomDataset
 
 
-# build PET recontruction object 
-temPath = r'C:\pythonWorkSpace\tmp003'
-PET = BuildGeometry_v4('mmr',0.5) #scanner mmr, with radial crop factor of 50%
-PET.loadSystemMatrix(temPath,is3d=False)
-
-# get some info of Pet object
-print('is3d:',PET.is3d)
-print('\nscanner info:', PET.scanner.as_dict())
-print('\nimage info:',PET.image.as_dict())
-print('\nsinogram info:',PET.sinogram.as_dict())
+def _load_config(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
 
 
-# this will take hours (5 phantoms, 5 random rotations each, lesion & sinogram simulation, 3 different recon,...)
-# see 'buildBrainPhantomDataset' for default values, e.g. count level, psf, no. lesions, lesion size, no. rotations, rotation range,....
-# LD/ld stands for low-definition low-dose, HD/hd stands for high-definition high-dose
+def main():
+    parser = argparse.ArgumentParser(description="Build FBSEM training datasets")
+    parser.add_argument("--config", default="configs/build_dataset.yaml",
+                        help="Path to YAML config file")
+    # Per-run overrides
+    parser.add_argument("--system_matrix_path", default=None)
+    parser.add_argument("--phantom_data_dir",   default=None)
+    parser.add_argument("--save_training_dir",  default=None)
+    parser.add_argument("--phantom_numbers",    nargs="+", type=int, default=None,
+                        help="Phantom indices to use, e.g. --phantom_numbers 0 1 2 3 4")
+    args = parser.parse_args()
 
-phanPath = r'C:\phantoms\brainWeb'
-save_training_dir = r'C:\MoDL\trainingDatasets\brainweb\2D'
-phanType ='brainweb'
-phanNumber = np.arange(0,5,1) # use first 5 brainweb phantoms out of 20
+    cfg = _load_config(args.config)
 
-buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType =phanType,  phanNumber = phanNumber,is3d = False, num_rand_rotations=5)
+    # Apply CLI overrides
+    for key in ("system_matrix_path", "phantom_data_dir", "save_training_dir"):
+        val = getattr(args, key)
+        if val is not None:
+            cfg[key] = val
+    if args.phantom_numbers is not None:
+        cfg["phantom_numbers"] = args.phantom_numbers
+
+    # Validate required paths
+    for field in ("system_matrix_path", "phantom_data_dir", "save_training_dir"):
+        if cfg.get(field) in (None, "/path/to/system_matrix",
+                              "/path/to/brainweb_raws", "/path/to/output/"):
+            raise ValueError(
+                f"Config field '{field}' must be set to a real path. "
+                f"Edit configs/build_dataset.yaml or pass --{field} on the command line."
+            )
+
+    # ── PET geometry ──────────────────────────────────────────────────────────
+    PET = BuildGeometry_v4(cfg["scanner"], cfg["radial_bin_crop_factor"])
+    PET.loadSystemMatrix(cfg["system_matrix_path"], is3d=cfg["is_3d"])
+
+    print("PET scanner:", cfg["scanner"])
+    print("is_3d:", cfg["is_3d"])
+    print("Saving datasets to:", cfg["save_training_dir"])
+
+    # ── Phantom numbers ───────────────────────────────────────────────────────
+    phantom_numbers = cfg.get("phantom_numbers")
+    if phantom_numbers is not None:
+        phantom_numbers = np.array(phantom_numbers)
+
+    # ── Build datasets ────────────────────────────────────────────────────────
+    slices_2d = cfg.get("slices_2d")
+    if slices_2d is not None:
+        slices_2d = np.array(slices_2d)
+
+    buildBrainPhantomDataset(
+        PET,
+        save_training_dir=cfg["save_training_dir"],
+        phanPath=cfg["phantom_data_dir"],
+        phanType=cfg["phantom_type"],
+        phanNumber=phantom_numbers,
+        is3d=cfg["is_3d"],
+        num_rand_rotations=cfg["num_rand_rotations"],
+        rot_angle_degrees=cfg["rot_angle_degrees"],
+        psf_hd=cfg["psf_hd_cm"],
+        psf_ld=cfg["psf_ld_cm"],
+        niter_hd=cfg["niter_hd"],
+        niter_ld=cfg["niter_ld"],
+        nsubs_hd=cfg["nsubs_hd"],
+        nsubs_ld=cfg["nsubs_ld"],
+        counts_hd=cfg["counts_hd"],
+        count_ld_window_3d=cfg["count_ld_window_3d"],
+        count_ld_window_2d=cfg["count_ld_window_2d"],
+        slices_2d=slices_2d,
+        pet_lesion=cfg["add_pet_lesion"],
+        t1_lesion=cfg["add_t1_lesion"],
+        num_lesions=cfg["num_lesions"],
+        lesion_size_mm=cfg["lesion_size_mm"],
+        hot_cold_ratio=cfg["hot_cold_ratio"],
+    )
+
+    print("Done.")
 
 
-# check out the strcuture of the produced datasets, e.g. data-0.npy
-d = np.load(save_training_dir+ '\\' + 'data-0.npy',allow_pickle=True).item()
-d.keys()
-
-
-fig, ax = plt.subplots(1,4,figsize=(20,10))
-ax[0].imshow(d['mrImg'],cmap='gist_gray'),ax[0].set_title('mrImg',fontsize=20)
-ax[1].imshow(d['imgHD'],cmap='gist_gray_r'),ax[1].set_title('imgHD',fontsize=20)
-ax[2].imshow(d['imgLD'],cmap='gist_gray_r'),ax[2].set_title('imgLD',fontsize=20)
-ax[3].imshow(d['imgLD_psf'],cmap='gist_gray_r'),ax[3].set_title('imgLD_psf',fontsize=20)
-
-
-fig, ax = plt.subplots(1,2,figsize=(20,10))
-ax[0].imshow(d['sinoLD']),ax[0].set_title('sinoLD',fontsize=20)
-ax[1].imshow(d['AN']),ax[1].set_title('Atten. factors * Norm. Factors (AN)',fontsize=20)
-
+if __name__ == "__main__":
+    main()

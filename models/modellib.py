@@ -14,6 +14,59 @@ from models.deeplib import zeroNanInfs, crop, uncrop
 import numpy as np
 
 
+class WeightedMSELoss(nn.Module):
+    """MSE with higher weight on foreground (non-background) voxels.
+
+    Voxels whose target value exceeds ``threshold_fraction * target.max()``
+    are given ``foreground_weight`` × more gradient signal.  This prevents the
+    loss from being dominated by the large number of zero-valued background
+    voxels, giving lesions and brain tissue a stronger learning signal.
+    """
+    def __init__(self, foreground_weight=10.0, threshold_fraction=0.05):
+        super().__init__()
+        self.foreground_weight = foreground_weight
+        self.threshold_fraction = threshold_fraction
+
+    def forward(self, pred, target):
+        threshold = target.detach().max() * self.threshold_fraction
+        weight = torch.where(
+            target > threshold,
+            torch.full_like(target, self.foreground_weight),
+            torch.ones_like(target),
+        )
+        return (weight * (pred - target).pow(2)).mean()
+
+
+def _compute_ssim_psnr(pred_t, target_t):
+    """Return mean SSIM and PSNR over a batch of reconstructed images.
+
+    Parameters
+    ----------
+    pred_t, target_t : torch.Tensor, shape (B, 1, H, W)
+
+    Returns
+    -------
+    ssim_val : float or None  — None when skimage is not installed
+    psnr_val : float
+    """
+    pred   = pred_t.detach().cpu().numpy().squeeze(1).astype('float32')   # (B, H, W)
+    target = target_t.detach().cpu().numpy().squeeze(1).astype('float32')
+
+    mse     = np.mean((pred - target) ** 2, axis=(1, 2))
+    max_val = target.max(axis=(1, 2))
+    psnr_val = float(np.mean(20.0 * np.log10(max_val / (np.sqrt(mse) + 1e-8))))
+
+    ssim_val = None
+    try:
+        from skimage.metrics import structural_similarity as _ssim
+        ssim_val = float(np.mean([
+            _ssim(pred[i], target[i], data_range=float(target[i].max()))
+            for i in range(pred.shape[0])
+        ]))
+    except ImportError:
+        pass
+
+    return ssim_val, psnr_val
 
 
 class ResUnit_v2(nn.Module):
@@ -54,12 +107,12 @@ class ResUnit_v2(nn.Module):
         return out
    
 class FBSEMnet_v3(nn.Module):
-    def __init__(self, depth,num_kernels, kernel_size, in_channels=1,is3d=False, reg_ccn_model = 'resUnit'):
-        super(FBSEMnet_v3,self).__init__()
-        if reg_ccn_model.lower()=='resUnit'.lower():
-            self.regularize = ResUnit_v2(depth, num_kernels, kernel_size,in_channels,is3d)
+    def __init__(self, depth, num_kernels, kernel_size, in_channels=1, is3d=False, reg_cnn_model='resUnit'):
+        super(FBSEMnet_v3, self).__init__()
+        if reg_cnn_model.lower() == 'resunit':
+            self.regularize = ResUnit_v2(depth, num_kernels, kernel_size, in_channels, is3d)
         else:
-            raise ValueError('model unkown')
+            raise ValueError(f"Unknown reg_cnn_model: {reg_cnn_model!r}. Only 'resUnit' is supported.")
         self.gamma = nn.Parameter(torch.rand(1),requires_grad=True)
         self.is3d = is3d
         
@@ -141,19 +194,43 @@ def Trainer(PET, model, opts, train_loader, valid_loader=None):
     g.do_validation = True
     g.device = 'cpu'
     g.mr_scale = 5
+    g.loss_type = 'mse'          # 'mse' or 'weighted_mse'
+    g.foreground_weight = 10.0   # weight multiplier for foreground voxels (weighted_mse only)
+    # LR scheduling (ReduceLROnPlateau)
+    g.lr_scheduler = 'plateau'   # 'plateau' or None to disable
+    g.lr_patience = 5            # epochs without improvement before LR reduction
+    g.lr_factor = 0.5            # multiply LR by this factor on plateau
+    g.lr_min = 1e-6              # floor for LR reduction
+    # Early stopping
+    g.early_stop_patience = 15   # epochs without improvement before stopping (None to disable)
 
-    g = setOptions(g,opts)
+    g = setOptions(g, opts)
 
     if not os.path.exists(g.save_dir):
         os.makedirs(g.save_dir)
 
-    loss_fn = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(),lr=g.lr )
+    if g.loss_type == 'weighted_mse':
+        loss_fn = WeightedMSELoss(g.foreground_weight)
+    else:
+        loss_fn = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=g.lr)
+    if g.lr_scheduler == 'plateau':
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=g.lr_factor,
+            patience=g.lr_patience, min_lr=g.lr_min, verbose=True,
+        )
+    else:
+        scheduler = None
+
     toNumpy = lambda x: x.detach().cpu().numpy().astype('float32')
 
     train_losses = []
     valid_losses = []
+    valid_ssims  = []
+    valid_psnrs  = []
     gamma = []
+    best_valid_loss  = float('inf')
+    early_stop_count = 0
     
     for e in range(g.epochs):
          
@@ -179,8 +256,8 @@ def Trainer(PET, model, opts, train_loader, valid_loader=None):
              running_loss+=loss.item()
              
              if torch.isnan(model.gamma) or model.gamma.data<0:
-                 model.gamma.data= model.gamma.data= torch.Tensor([0.01]).to(g.device,dtype=torch.float32)
-             if display:
+                 model.gamma.data = torch.Tensor([0.01]).to(g.device,dtype=torch.float32)
+             if g.display:
                  imShowBatch(crop(toNumpy(img).squeeze(),0.3), figsize = g.disp_figsize)
                  gam = model.gamma.clone().detach().cpu().numpy()[0]
                  print(f"gamma: {gam}")
@@ -191,35 +268,85 @@ def Trainer(PET, model, opts, train_loader, valid_loader=None):
              train_losses.append(running_loss/len(train_loader))
              print(f"Epoch: {e+1}/{g.epochs}, Training loss: {train_losses[e]:.3f}")
              if g.do_validation:
-                 valid_loss = 0
+                 valid_loss   = 0.0
+                 ssim_sum     = 0.0
+                 psnr_sum     = 0.0
+                 ssim_tracked = False
                  with torch.no_grad():
                      model.eval()
-                     for sinoLD, imgHD, AN, _,_, _, mrImg, _, _,index in valid_loader:
-                         AN=toNumpy(AN)
-                         RS = None
-                         sinoLD=toNumpy(sinoLD)
-                         imgHD = imgHD.to(g.device,dtype=torch.float32).unsqueeze(1)
-                         if g.in_channels==2:
-                             mrImg = g.mr_scale*mrImg/mrImg.max()
-                             mrImg = mrImg.to(g.device,dtype=torch.float32).unsqueeze(1)
+                     for sinoLD, imgHD, AN, _, _, _, mrImg, _, _, index in valid_loader:
+                         AN     = toNumpy(AN)
+                         sinoLD = toNumpy(sinoLD)
+                         imgHD  = imgHD.to(g.device, dtype=torch.float32).unsqueeze(1)
+                         if g.in_channels == 2:
+                             mrImg = g.mr_scale * mrImg / mrImg.max()
+                             mrImg = mrImg.to(g.device, dtype=torch.float32).unsqueeze(1)
                          else:
                              mrImg = None
-                         img = model.forward(PET,prompts = sinoLD,AN=AN, mrImg = mrImg, niters=g.niters, nsubs = g.nsubs, psf=g.psf_cm, device=g.device, crop_factor=g.crop_factor)#, 
-                         valid_loss +=loss_fn(img,imgHD).item()
-                 valid_losses.append(valid_loss/len(valid_loader))
+                         img = model.forward(PET, prompts=sinoLD, AN=AN, mrImg=mrImg,
+                                             niters=g.niters, nsubs=g.nsubs, psf=g.psf_cm,
+                                             device=g.device, crop_factor=g.crop_factor)
+                         valid_loss += loss_fn(img, imgHD).item()
+                         ssim_val, psnr_val = _compute_ssim_psnr(img, imgHD)
+                         if ssim_val is not None:
+                             ssim_sum += ssim_val
+                             ssim_tracked = True
+                         psnr_sum += psnr_val
+                 n_val = len(valid_loader)
+                 valid_losses.append(valid_loss / n_val)
+                 valid_psnrs.append(psnr_sum / n_val)
+                 if ssim_tracked:
+                     valid_ssims.append(ssim_sum / n_val)
                  model.train()
-                 print(f"Epoch: {e+1}/{g.epochs}, Validation loss: {valid_losses[e]:.3f}")
-             if ((g.save_from_epoch is not None) and (g.save_from_epoch <=e)) or e==(g.epochs - 1):
-                  g.state_dict = model.state_dict()
+                 ssim_str = f", SSIM: {valid_ssims[-1]:.4f}" if ssim_tracked else ""
+                 print(f"Epoch: {e+1}/{g.epochs}, "
+                       f"Val loss: {valid_losses[-1]:.4f}, "
+                       f"PSNR: {valid_psnrs[-1]:.2f} dB{ssim_str}")
+             # ── LR scheduler step ──────────────────────────────────────────
+             monitor_loss = valid_losses[-1] if (g.do_validation and valid_losses) else train_losses[-1]
+             if scheduler is not None:
+                 scheduler.step(monitor_loss)
+
+             # ── Early stopping ─────────────────────────────────────────────
+             stop_early = False
+             if g.early_stop_patience is not None and g.do_validation and valid_losses:
+                 if monitor_loss < best_valid_loss:
+                     best_valid_loss  = monitor_loss
+                     early_stop_count = 0
+                 else:
+                     early_stop_count += 1
+                     if early_stop_count >= g.early_stop_patience:
+                         print(f"Early stopping at epoch {e+1} "
+                               f"(no improvement for {g.early_stop_patience} epochs).")
+                         stop_early = True
+
+             # ── Checkpoint ────────────────────────────────────────────────
+             is_last = stop_early or e == (g.epochs - 1)
+             if ((g.save_from_epoch is not None) and (g.save_from_epoch <= e)) or is_last:
+                  g.state_dict   = model.state_dict()
                   g.train_losses = train_losses
                   g.valid_losses = valid_losses
+                  g.valid_psnrs  = valid_psnrs
+                  g.valid_ssims  = valid_ssims
                   g.training_idx = train_loader.sampler.indices
-                  g.gamma = gamma
-                  
-                  checkpoint = g.as_dict()
-                  torch.save(checkpoint,g.save_dir+g.model_name+'-epo-'+str(e)+'.pth')
+                  g.gamma        = gamma
 
-             torch.cuda.empty_cache()  
+                  checkpoint = g.as_dict()
+                  save_path  = os.path.join(g.save_dir, f"{g.model_name}-epo-{e}.pth")
+                  torch.save(checkpoint, save_path)
+                  print(f"Saved checkpoint: {save_path}")
+
+             torch.cuda.empty_cache()
+             if stop_early:
+                 break
+
+    return {
+        'train_losses': train_losses,
+        'valid_losses': valid_losses,
+        'valid_psnrs':  valid_psnrs,
+        'valid_ssims':  valid_ssims,
+        'gamma':        gamma,
+    }
              
              
 def fbsemInference(dl_model_flname, PET, sinoLD, AN, mrImg, niters=None, nsubs = None, device='cpu'):
@@ -228,7 +355,9 @@ def fbsemInference(dl_model_flname, PET, sinoLD, AN, mrImg, niters=None, nsubs =
 
     g = torch.load(dl_model_flname, map_location=torch.device(device))
     
-    model = FBSEMnet_v3(g['depth'], g['num_kernels'], g['kernel_size'], g['in_channels'], g['is3d'], g['reg_ccn_model']).to(device)
+    reg_cnn_model = g.get('reg_cnn_model', g.get('reg_ccn_model', 'resUnit'))
+    model = FBSEMnet_v3(g['depth'], g['num_kernels'], g['kernel_size'],
+                        g['in_channels'], g['is3d'], reg_cnn_model).to(device)
     model.load_state_dict(g['state_dict'])
     
     AN=toNumpy(AN)

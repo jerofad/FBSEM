@@ -72,7 +72,7 @@ class dotstruct():
     def __setattr__(self, name, value):
          self.__dict__[name] = value
     def __getitem__(self, name):
-        return self[name]
+        return self.__dict__[name]
     def as_dict(self):
         dic = {}
         for item in self.__dict__.keys(): 

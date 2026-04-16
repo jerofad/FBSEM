@@ -16,35 +16,26 @@ def buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType = 'brain
                                    counts_hd = 1e10, count_ld_window_3d=[90e6,120e6], count_ld_window_2d=[1e6,10e6], slices_2d = None, \
                                    pet_lesion =True, t1_lesion = True, num_lesions = 15, lesion_size_mm = [2,8], hot_cold_ratio = 0.6):
 
-    # phanNumber: an numpy.array or list indicating number of phantoms, e.g. 10, np.arange(10,20) , [0,10,50] 
+    # phanNumber: an numpy.array or list indicating number of phantoms, e.g. 10, np.arange(10,20) , [0,10,50]
     """
-    example:
-    from numpy import arange
-    from geometry.BuildGeometry_v4 import BuildGeometry_v4 
-    from phantoms.deeplib import buildBrainPhantomDataset
-    
-    binPath = r'C:\MatlabWorkSpace\apirl-tags\APIRL1.3.3_win64_cuda8.0_sm35\build\bin'
-    temPath = r'C:\pythonWorkSpace\tmp003'
-    is3d = False
-    phanType = 'brainkcl' #brainweb
-    
-    PET = BuildGeometry_v4('mmr',0.5)
-    if is3d:
-         PET.setApirlMmrEngine(binPath =binPath, temPath=temPath,gpu = True)
-    else:
-         PET.loadSystemMatrix(temPath,is3d=False)
-         
-    if phanType=='brainkcl':
-       phanPath = r'J:\phantoms\brainKCL'
-       save_training_dir = 'J:\\MoDL\\trainingDatasets\\brainKCL\\2D\\data02-test\\'
-    else:
-         phanPath = r'J:\phantoms\brainWeb'
-         save_training_dir = 'J:\\MoDL\\trainingDatasets\\brainweb\\2D\\data01\\'
+    Example (2D BrainWeb):
 
-    phanNumber = arange(0,10,1)
- 
-    buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType =phanType,  phanNumber = phanNumber,is3d = is3d, count_ld_window_2d=[1e6,10e6])
-    
+        from numpy import arange
+        from geometry.BuildGeometry_v4 import BuildGeometry_v4
+        from models.deeplib import buildBrainPhantomDataset
+
+        PET = BuildGeometry_v4('mmr', 0.5)
+        PET.loadSystemMatrix('/path/to/system_matrix', is3d=False)
+
+        buildBrainPhantomDataset(
+            PET,
+            save_training_dir='/path/to/output/',
+            phanPath='/path/to/brainweb_raws/',
+            phanType='brainweb',
+            phanNumber=arange(0, 10),
+            is3d=False,
+            count_ld_window_2d=[1e6, 10e6],
+        )
     """
     bar = PET.engine.bar
     import os
@@ -56,15 +47,8 @@ def buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType = 'brain
          else:
               if np.isscalar(phanNumber): phanNumber = [phanNumber]
               phanNumber = np.array(phanNumber)
-    elif phanType.lower() == 'brainkcl':
-         from phantoms.brainkcl import PETbrainKclPhantom
-         
-         phanFolder = os.listdir(phanPath)
-         if phanNumber is None:
-              phanNumber = np.arange(len(phanFolder))
-         else:
-              if np.isscalar(phanNumber): phanNumber = [phanNumber]
-              phanNumber = np.array(phanNumber)
+    else:
+         raise ValueError(f"Unknown phanType: {phanType!r}. Only 'brainweb' is supported.")
     if not os.path.isdir(save_training_dir):
          os.makedirs(save_training_dir)
     if slices_2d is None:
@@ -84,12 +68,7 @@ def buildBrainPhantomDataset(PET, save_training_dir, phanPath, phanType = 'brain
     f=0
     for i in phanNumber:
         print(f"* create phantom {i}...")
-        if phanType.lower()=='brainweb':
-             img,mumap,t1,_= PETbrainWebPhantom(phanPath, i, voxel_size,image_size, num_lesions, lesion_size_mm, pet_lesion,t1_lesion, False,hot_cold_ratio)
-        elif phanType.lower()=='brainkcl':
-             nii_path = phanPath + bar + phanFolder[i] + bar + 'nii'
-             dset['phanPath'] = nii_path
-             img,mumap,t1 = PETbrainKclPhantom(nii_path,voxel_size,image_size, num_lesions, lesion_size_mm, pet_lesion ,t1_lesion, hot_cold_ratio)               
+        img, mumap, t1, _ = PETbrainWebPhantom(phanPath, i, voxel_size, image_size, num_lesions, lesion_size_mm, pet_lesion, t1_lesion, False, hot_cold_ratio)               
         randomAngle = 2*rot_angle_degrees*np.random.rand(num_rand_rotations)-rot_angle_degrees
         randomAngle[0]=0
         
@@ -170,20 +149,23 @@ from torch.utils.data import Dataset
 from numpy import load, ceil
 
 class DatasetPetMr_v2(Dataset):
-    def __init__(self, filename, num_train, transform=None, target_transform=None, is3d=False, imgLD_flname = None,crop_factor = 0, allow_pickle=True):
+    def __init__(self, filename, num_train, transform=None, target_transform=None,
+                 is3d=False, imgLD_flname=None, crop_factor=0, allow_pickle=True, augment=False):
         """
-        filename = ['save_dir,'prefix']
-        num_train =number of traning datasets
-        set "has_gtruth=False" for invivo data
+        filename     : ['save_dir/', 'prefix'] — base path for data-N.npy files
+        num_train    : total number of dataset files
+        augment      : if True, apply random left-right flip + MR intensity jitter
+                       (intended for the training split only)
         """
         self.transform = transform
-        self.target_transform=target_transform
+        self.target_transform = target_transform
         self.is3d = is3d
         self.filename = filename
         self.num_train = num_train
         self.imgLD_flname = imgLD_flname
         self.crop_factor = crop_factor
-        self.allow_pickle =allow_pickle
+        self.allow_pickle = allow_pickle
+        self.augment = augment
         
     def crop_sino(self,sino):
          if self.crop_factor!=0:
@@ -234,26 +216,57 @@ class DatasetPetMr_v2(Dataset):
              imgLD_psf = self.crop_img(dset['imgLD_psf'])
         else:
              imgLD_psf = 0
+        # ── Online augmentation (training split only) ────────────────────────
+        if self.augment:
+            # Left-right flip (50 % probability).
+            # In 2-D PET, flipping image columns corresponds to reversing sinogram
+            # radial bins (axis 0), so the physics remain self-consistent.
+            if np.random.rand() > 0.5:
+                sinoLD = sinoLD[::-1, :].copy()
+                AN     = AN[::-1, :].copy()
+                imgHD  = imgHD[:, ::-1].copy()
+                mrImg  = mrImg[:, ::-1].copy()
+                if not np.isscalar(RS):
+                    RS = RS[::-1, :].copy()
+                if not np.isscalar(imgLD):
+                    imgLD = imgLD[:, ::-1].copy()
+                if not np.isscalar(imgLD_psf):
+                    imgLD_psf = imgLD_psf[:, ::-1].copy()
+                if not np.isscalar(imgGT):
+                    imgGT = imgGT[:, ::-1].copy()
+
+            # MR intensity jitter: uniform scale in [0.8, 1.2].
+            # Only applied to the MR image; PET sinogram physics are unchanged.
+            mr_scale = 0.8 + 0.4 * np.random.rand()
+            mrImg = (mrImg * mr_scale).astype(mrImg.dtype)
+
+        # ── External transforms ───────────────────────────────────────────────
         if self.transform is not None:
             sinoLD = self.transform(sinoLD)
-            AN = self.transform(AN)   
+            AN = self.transform(AN)
             if not np.isscalar(RS):
-                 RS = self.transform(RS) 
+                RS = self.transform(RS)
         if self.target_transform is not None:
             imgHD = self.target_transform(imgHD)
             mrImg = self.target_transform(mrImg)
             if not np.isscalar(imgLD):
-                 imgLD = self.target_transform(imgLD)
+                imgLD = self.target_transform(imgLD)
             if not np.isscalar(imgLD_psf):
-                 imgLD_psf = self.target_transform(imgLD_psf)
+                imgLD_psf = self.target_transform(imgLD_psf)
             if not np.isscalar(imgGT):
-                 imgGT = self.target_transform(imgGT)
+                imgGT = self.target_transform(imgGT)
 
-        return sinoLD, imgHD, AN, RS,imgLD, imgLD_psf, mrImg, counts, imgGT,index
+        return sinoLD, imgHD, AN, RS, imgLD, imgLD_psf, mrImg, counts, imgGT, index
    
 
    
-def train_test_split(dset, num_train, batch_size, test_size, valid_size=0, num_workers = 0, shuffle=True):
+def train_test_split(train_dset, eval_dset, num_train, batch_size, test_size,
+                     valid_size=0, num_workers=0, shuffle=True):
+    """Split indices into train / valid / test and return DataLoaders.
+
+    ``train_dset`` is used for the training loader (may have augmentation).
+    ``eval_dset``  is used for validation and test loaders (no augmentation).
+    """
     from torch.utils.data.sampler import SubsetRandomSampler
     from torch.utils.data import DataLoader
     from numpy import floor, random
@@ -261,65 +274,68 @@ def train_test_split(dset, num_train, batch_size, test_size, valid_size=0, num_w
     indx = list(range(num_train))
     if shuffle:
         random.shuffle(indx)
-    split = int(floor(num_train*(test_size)))
-    train_idx,test_idx = indx[split:],indx[:split]
-    
+    split = int(floor(num_train * test_size))
+    train_idx, test_idx = indx[split:], indx[:split]
+
     valid_loader = None
-    valid_idx = None
     if valid_size:
         if shuffle:
             random.shuffle(train_idx)
-        split = int(floor(len(train_idx)*valid_size))
-        train_idx,valid_idx = train_idx[split:],train_idx[:split]
-        valid_sampler = SubsetRandomSampler(valid_idx)
-        valid_loader = DataLoader(dset,batch_size = batch_size, sampler = valid_sampler, num_workers = num_workers, pin_memory=False)
-  
-    test_sampler = SubsetRandomSampler(test_idx)
-    train_sampler = SubsetRandomSampler(train_idx)
-    train_loader = DataLoader(dset,batch_size = batch_size, sampler = train_sampler, num_workers = num_workers, pin_memory=False)
-    test_loader = DataLoader(dset,batch_size = batch_size, sampler = test_sampler, num_workers = num_workers,pin_memory=False)
- 
-    return train_loader, test_loader, valid_loader#, train_idx, test_idx, valid_idx
+        split = int(floor(len(train_idx) * valid_size))
+        train_idx, valid_idx = train_idx[split:], train_idx[:split]
+        valid_loader = DataLoader(eval_dset, batch_size=batch_size,
+                                  sampler=SubsetRandomSampler(valid_idx),
+                                  num_workers=num_workers, pin_memory=False)
+
+    train_loader = DataLoader(train_dset, batch_size=batch_size,
+                              sampler=SubsetRandomSampler(train_idx),
+                              num_workers=num_workers, pin_memory=False)
+    test_loader  = DataLoader(eval_dset, batch_size=batch_size,
+                              sampler=SubsetRandomSampler(test_idx),
+                              num_workers=num_workers, pin_memory=False)
+
+    return train_loader, test_loader, valid_loader
 
 
-def PETMrDataset(filename, num_train, batch_size, test_size, valid_size=0, num_workers = 0, \
-                 transform=None, target_transform=None, is3d=False, imgLD_flname = None,   shuffle=True, crop_factor = 0):
- 
-     dset = DatasetPetMr_v2(filename,num_train, transform, target_transform, is3d, imgLD_flname,crop_factor)
-     train_loader, test_loader, valid_loader = train_test_split(dset, num_train, batch_size, test_size, valid_size, num_workers, shuffle)
-     # for indecs call train_loader.sampler.indices
-     return train_loader, valid_loader, test_loader
+def PETMrDataset(filename, num_train, batch_size, test_size, valid_size=0, num_workers=0,
+                 transform=None, target_transform=None, is3d=False, imgLD_flname=None,
+                 shuffle=True, crop_factor=0, augment=False):
+    """Create train / validation / test DataLoaders.
+
+    The training loader uses ``augment=True`` (random LR flip + MR jitter) when
+    ``augment=True`` is passed.  Validation and test loaders never augment.
+    """
+    train_dset = DatasetPetMr_v2(filename, num_train, transform, target_transform,
+                                  is3d, imgLD_flname, crop_factor, augment=augment)
+    eval_dset  = DatasetPetMr_v2(filename, num_train, transform, target_transform,
+                                  is3d, imgLD_flname, crop_factor, augment=False)
+    train_loader, test_loader, valid_loader = train_test_split(
+        train_dset, eval_dset, num_train, batch_size, test_size, valid_size, num_workers, shuffle
+    )
+    # Access train/valid/test indices via loader.sampler.indices
+    return train_loader, valid_loader, test_loader
 
 
 def noise_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, PET=None, psf_hd=0.25,psf_ld=0.4,\
                               niter_hd = 15, niter_ld = 10, nsubs_hd = 14, nsubs_ld = 14,\
                               counts_hd = 1e10,counts_ld=None, num_noise_realizations = 10):
      """
-     example:
-          
-    from geometry.BuildGeometry_v4 import BuildGeometry_v4 
-    from phantoms.brainkcl import PETbrainKclPhantom
-    from models.deeplib import noise_realizations
-    temPath = r'C:\pythonWorkSpace\tmp003'
-    is3d = False
-    phanType = 'brainkcl' #brainweb
-    
-    PET = BuildGeometry_v4('mmr',0.5)
-    PET.loadSystemMatrix(temPath,is3d=False)          
-          
-    voxel_size = np.array(PET.image.voxelSizeCm)*10
-    image_size = PET.image.matrixSize
+     Example:
 
-    nii_path = r'J:\phantoms\brainKCL\add_mMR_62\nii'
-    img,mumap,t1 = PETbrainKclPhantom(nii_path,voxel_size,image_size, num_lesions=20, lesion_size_mm=[2,8], pet_lesion=True ,t1_lesion=True, hot_cold_ratio=0.7)
-          
-          # pick up a slice (passing through pet lesions)
-    idx = np.nonzero(img.max(axis=1).max(axis=0) == img.max())[0]
-    slice = 74  
-    counts_ld = 0.1e6    
-    save_dir = r'J:\MoDL\trainingDatasets\brainKCL\2D\data02\noise-realization-add_mMR_62\noise-0.5e6'
-    noise_realizations(img[:,:,slice], mumap[:,:,slice], t1[:,:,slice], save_dir, PET=PET, counts_ld=counts_ld)
-          
+         from geometry.BuildGeometry_v4 import BuildGeometry_v4
+         from phantoms.brainweb import PETbrainWebPhantom
+         from models.deeplib import noise_realizations
+
+         PET = BuildGeometry_v4('mmr', 0.5)
+         PET.loadSystemMatrix('/path/to/system_matrix', is3d=False)
+
+         voxel_size = np.array(PET.image.voxelSizeCm) * 10
+         image_size = PET.image.matrixSize
+         img, mumap, t1, _ = PETbrainWebPhantom('/path/to/brainweb/', subject=4,
+                                                 voxel_size=voxel_size, image_size=image_size)
+         slice_idx = 74
+         noise_realizations(img[:, :, slice_idx], mumap[:, :, slice_idx], t1[:, :, slice_idx],
+                            save_dir='/path/to/output/', PET=PET, counts_ld=0.1e6)
      """
      import os
      import numpy as np 
@@ -327,9 +343,9 @@ def noise_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, PET=None
      if not os.path.exists(save_dir):
           os.makedirs(save_dir)
      if PET is None:
-          from geometry.BuildGeometry import BuildGeometry
-          PET = BuildGeometry('mmr')
-          PET.loadSystemMatrix(pet_geometry_dir)     
+          from geometry.BuildGeometry_v4 import BuildGeometry_v4
+          PET = BuildGeometry_v4('mmr', 0.5)
+          PET.loadSystemMatrix(pet_geometry_dir)
 
      if counts_ld is None:
           count_ld_window_2d=[1e6,10e6]
@@ -355,7 +371,7 @@ def noise_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, PET=None
           dset['counts'] = counts_ld
           dset['imgLD'] = img_ld
           dset['imgLD_psf'] = img_ld_psf
-          np.save(save_dir+'\data-nr'+str(j)+'.npy', dset)
+          np.save(save_dir+'/data-nr'+str(j)+'.npy', dset)
 
         
 def noise_levels_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, PET=None, psf_hd=0.15,psf_ld=0.15,\
@@ -365,7 +381,7 @@ def noise_levels_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, P
           from deeplib import noise_levels_realizations
           
           phantom_filename='D:\\pyTorch\\brainweb_20_raws\\subject_04.raws'
-          save_dir = r'D:\pyTorch\brainweb_20_raws\subject_04_noise_lr'
+          save_dir = r'D:/pyTorch\brainweb_20_raws\subject_04_noise_lr'
           pet_geometry_dir='J:\\MyPyWorkSapce\\mmr2008_brain\\'
           
           pet, mumap, t1,_ = PETbrainWebPhantom(phantom_filename,pet_lesion = True,t1_lesion = True)
@@ -383,10 +399,10 @@ def noise_levels_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, P
      if not os.path.exists(save_dir):
           os.makedirs(save_dir)
      if PET is None:
-          from geometry.BuildGeometry import BuildGeometry
-          PET = BuildGeometry('mmr')
-          PET.loadSystemMatrix(pet_geometry_dir)     
-     
+          from geometry.BuildGeometry_v4 import BuildGeometry_v4
+          PET = BuildGeometry_v4('mmr', 0.5)
+          PET.loadSystemMatrix(pet_geometry_dir)
+
      dset = {'sinoLD':[],'imgHD':[],'AN':[],'imgGT':[],'mrImg':[], 'counts':[],'psf':psf_ld}
          
      prompts_hd,AF,_= PET.simulateDataBatch2D(img,mumap,counts=counts_hd,psf=psf_hd)
@@ -409,13 +425,13 @@ def noise_levels_realizations(img, mumap, t1, save_dir, pet_geometry_dir=None, P
                dset['mrImg'] = t1   
                dset['counts'] = counts_ld[i]
                dset['imgOsem'] = img_ld[0,:,:]
-               np.save(save_dir+'\data-cl'+str(i)+'nr'+str(j)+'.npy', dset)
+               np.save(save_dir+'/data-cl'+str(i)+'nr'+str(j)+'.npy', dset)
 
 class dotstruct():
     def __setattr__(self, name, value):
          self.__dict__[name] = value
     def __getitem__(self, name):
-        return self[name]
+        return self.__dict__[name]
     def as_dict(self):
         dic = {}
         for item in self.__dict__.keys(): 

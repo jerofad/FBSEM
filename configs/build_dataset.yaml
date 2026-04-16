@@ -1,13 +1,13 @@
 # ── PET Scanner ──────────────────────────────────────────────────────────────
 scanner: mmr                    # 'mmr' (Siemens mMR) or 'mct' (Siemens mCT)
 radial_bin_crop_factor: 0.5
-system_matrix_path: /path/to/system_matrix   # Directory containing system matrix files
+system_matrix_path: /home/jeremiah/Datasets/PicoPET  # Directory containing system matrix files
 is_3d: false
 
 # ── Phantom Settings ──────────────────────────────────────────────────────────
 phantom_type: brainweb          # Only 'brainweb' is currently supported
-phantom_data_dir: /path/to/brainweb_raws     # Directory with subject_XX.raws files
-phantom_numbers: null           # null = all 20 subjects; or list e.g. [0,1,2,3,4]
+phantom_data_dir: /home/jeremiah/Datasets/PicoPET/brainweb_raws     # Directory with subject_XX.raws files
+phantom_numbers: [0,1]           # null = all 20 subjects; or list e.g. [0,1,2,3,4]
 num_rand_rotations: 5           # In-plane random rotations per phantom
 rot_angle_degrees: 15           # Max rotation angle (±degrees)
 
@@ -33,4 +33,4 @@ lesion_size_mm: [2, 8]          # Diameter range [min, max] in mm
 hot_cold_ratio: 0.6             # Fraction of lesions that are hot (vs cold)
 
 # ── Output ────────────────────────────────────────────────────────────────────
-save_training_dir: /path/to/output/   # Where data-N.npy files will be written
+save_training_dir: /home/jeremiah/Datasets/PicoPET/output   # Where data-N.npy files will be written
