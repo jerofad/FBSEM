@@ -193,14 +193,14 @@ class DatasetPetMr_v2(Dataset):
     def __getitem__(self, index):
         dset = load(self.filename[0]+self.filename[1]+str(index)+'.npy',allow_pickle=self.allow_pickle).item()
         
-        sinoLD =  self.crop_sino(dset['sinoLD'])
-        AN = self.crop_sino(dset['AN'])
-        imgHD = self.crop_img(dset['imgHD'])
+        sinoLD =  dset['sinoLD']
+        AN = dset['AN']
+        imgHD = dset['imgHD']
         mrImg = self.crop_img(dset['mrImg'])
         counts = dset['counts']
 
         if 'RS' in dset and type(dset['RS'])!=list:
-             RS = self.crop_sino(dset['RS'])
+             RS = dset['RS']
         else:
              RS = 0        
         if 'imgGT' in dset and type(dset['imgGT'])!=list:

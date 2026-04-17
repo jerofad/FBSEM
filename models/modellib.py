@@ -150,8 +150,6 @@ class FBSEMnet_v3(nn.Module):
              if batch_size ==1:
                  if iSensImg.ndim==2:  iSensImg = iSensImg[None].astype('float32') 
                  if img.ndim==1:  img = img[None].astype('float32')
-         if mrImg is not None:
-              mrImg = Crop(mrImg)
          imgt = toTorch(img)
 
          for i in range(niters):
@@ -217,7 +215,7 @@ def Trainer(PET, model, opts, train_loader, valid_loader=None):
     if g.lr_scheduler == 'plateau':
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=g.lr_factor,
-            patience=g.lr_patience, min_lr=g.lr_min, verbose=True,
+            patience=g.lr_patience, min_lr=g.lr_min,
         )
     else:
         scheduler = None
