@@ -90,7 +90,7 @@ def main():
     ).to(g.device, dtype=torch.float32)
 
     # ── Train ─────────────────────────────────────────────────────────────────
-    results = Trainer(PET, model, g, train_loader, valid_loader)
+    # results = Trainer(PET, model, g, train_loader, valid_loader)
 
     # ── Test-set inference (optional) ─────────────────────────────────────────
     dl_model_flname = os.path.join(g.save_dir, g.model_name + f"-epo-{g.epochs - 1}.pth")

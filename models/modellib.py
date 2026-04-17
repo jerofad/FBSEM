@@ -150,6 +150,8 @@ class FBSEMnet_v3(nn.Module):
              if batch_size ==1:
                  if iSensImg.ndim==2:  iSensImg = iSensImg[None].astype('float32') 
                  if img.ndim==1:  img = img[None].astype('float32')
+         if mrImg is not None:
+              mrImg = Crop(mrImg)
          imgt = toTorch(img)
 
          for i in range(niters):
@@ -354,8 +356,9 @@ def fbsemInference(dl_model_flname, PET, sinoLD, AN, mrImg, niters=None, nsubs =
     g = torch.load(dl_model_flname, map_location=torch.device(device))
     
     reg_cnn_model = g.get('reg_cnn_model', g.get('reg_ccn_model', 'resUnit'))
+    is3d = g.get('is3d', g.get('is_3d', False))
     model = FBSEMnet_v3(g['depth'], g['num_kernels'], g['kernel_size'],
-                        g['in_channels'], g['is3d'], reg_cnn_model).to(device)
+                        g['in_channels'], is3d, reg_cnn_model).to(device)
     model.load_state_dict(g['state_dict'])
     
     AN=toNumpy(AN)

@@ -196,7 +196,7 @@ class DatasetPetMr_v2(Dataset):
         sinoLD =  dset['sinoLD']
         AN = dset['AN']
         imgHD = dset['imgHD']
-        mrImg = self.crop_img(dset['mrImg'])
+        mrImg = dset['mrImg']
         counts = dset['counts']
 
         if 'RS' in dset and type(dset['RS'])!=list:
