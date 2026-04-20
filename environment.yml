@@ -1,0 +1,51 @@
+# Conda environment for FBSEM PET image reconstruction
+#
+# Create:  conda env create -f environment.yml
+# Activate: conda activate fbsem
+# Update:  conda env update -f environment.yml --prune
+
+name: fbsem
+
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+
+  # ── Numerics ────────────────────────────────────────────────────────────────
+  - numpy>=1.23,<2.0        # array operations; <2.0 avoids breaking numpy API changes
+  - scipy>=1.9              # ndimage Gaussian filter, interpolation
+
+  # ── Deep learning ───────────────────────────────────────────────────────────
+  # CPU-only build — remove the cpuonly package and change the index-url below
+  # for a CUDA build.  See https://pytorch.org/get-started/locally/
+  - pytorch>=2.0            # neural network training
+  - torchvision>=0.15       # needed by some torch utilities
+  - cpuonly                 # remove this line for GPU builds
+
+  # ── Visualisation ───────────────────────────────────────────────────────────
+  - matplotlib>=3.6
+
+  # ── Image quality metrics ───────────────────────────────────────────────────
+  - scikit-image>=0.20      # SSIM via skimage.metrics (optional but recommended)
+
+  # ── Monitoring ──────────────────────────────────────────────────────────────
+  - tensorboard>=2.13       # optional: live training curves via TensorBoard
+
+  # ── Config / IO ─────────────────────────────────────────────────────────────
+  - pyyaml>=6.0             # YAML config loading
+
+  # ── Notebooks (optional) ────────────────────────────────────────────────────
+  - jupyter
+  - ipykernel
+
+# ── GPU build instructions ───────────────────────────────────────────────────
+# If you have a CUDA GPU, replace the pytorch + cpuonly lines above with:
+#
+#   - pytorch>=2.0
+#   - pytorch-cuda=12.1      # match your driver; check nvidia-smi
+#
+# Or install via pip inside the activated env:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
