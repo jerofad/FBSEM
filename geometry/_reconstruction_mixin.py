@@ -286,18 +286,26 @@ class _ReconstructionMixin:
         img_mapem : (B, W, W) — reconstructed images
         """
         from geometry.Prior import Prior
-        prior       = Prior(list(self.image.matrixSize[:2]), sWindowSize=3)
-        num_batches = prompts.shape[0]
-        img_mapem   = np.zeros_like(mrImg)
+        from skimage.transform import resize as sk_resize
+        W           = int(self.image.matrixSize[0])
+        H           = int(self.image.matrixSize[1])
+        prior       = Prior([W, H], sWindowSize=3)
+        num_batches = int(prompts.shape[0])
+        img_mapem   = np.zeros((num_batches, W, H), dtype="float32")
 
         for i in range(num_batches):
-            mr_norm        = mrImg[i] / (mrImg[i].max() + 1e-8)
-            weights        = prior.BowshserWeights(mr_norm, prior.nS // 2)
-            img_mapem[i]   = self.MAPEM2D(
+            mr_i = mrImg[i]
+            if mr_i.shape[0] != W or mr_i.shape[1] != H:
+                mr_i = sk_resize(mr_i, (W, H), order=1,
+                                 preserve_range=True, anti_aliasing=True).astype("float32")
+            mr_norm  = mr_i / (mr_i.max() + 1e-8)
+            weights  = prior.BowshserWeights(mr_norm, prior.nS // 2)
+            result   = self.MAPEM2D(
                 prompts[i], niter=niters, nsubs=nsubs,
                 AN=AN[i], psf=psf, beta=beta,
                 prior=prior, prior_weights=weights,
             )
+            img_mapem[i] = result.reshape(W, H)
             logger.debug("mrMAPEM2DBatch: slice %d/%d done.", i + 1, num_batches)
 
         return img_mapem
