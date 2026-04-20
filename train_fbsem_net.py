@@ -158,16 +158,15 @@ def main() -> None:
     logger.info("Trainable parameters: {:,}".format(n_params))
 
     # ── Train ─────────────────────────────────────────────────────────────────
-    # logger.info("Starting training ...")
-    # results = Trainer(PET, model, g, train_loader, valid_loader)
+    logger.info("Starting training ...")
+    results = Trainer(PET, model, g, train_loader, valid_loader)
 
-    # final_ckpt = results.get("final_checkpoint")
-    # if final_ckpt is None:
-    #     logger.warning("No checkpoint was saved during training; skipping inference.")
-    #     return
+    final_ckpt = results.get("final_checkpoint")
+    if final_ckpt is None:
+        logger.warning("No checkpoint was saved during training; skipping inference.")
+        return
 
     # ── Test-set inference ────────────────────────────────────────────────────
-    final_ckpt = "/home/jeremiah/Datasets/PicoPET/Model/fbsem-pm-01-epo-1.pth"
     logger.info("Running test-set inference from: %s", final_ckpt)
     sinoLD, imgHD, AN, _, imgLD, imgLD_psf, mrImg, _, imgGT, _ = next(iter(test_loader))
 
