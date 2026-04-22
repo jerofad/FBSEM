@@ -398,7 +398,7 @@ def Trainer(PET, model, opts, train_loader, valid_loader=None) -> dict:
     g.lr_factor          = 0.5
     g.lr_min             = 1e-6
     g.early_stop_patience = 15             # None to disable
-    g.tensorboard_dir    = None            # set to a path to enable TensorBoard
+    g.tensorboard_dir    = "/scratch/fdgjer001/FBSEM/logging"            # set to a path to enable TensorBoard
     g.tb_image_interval  = 5              # log sample images every N epochs
 
     g = setOptions(g, opts)

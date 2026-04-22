@@ -9,6 +9,9 @@ __pycache__/
 # Directory
 configs/
 
+slurm-*.out
+gen_dataset.sh
+run_fbsem.sh
 # Distribution / packaging
 .Python
 build/
